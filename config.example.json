@@ -1,0 +1,7 @@
+{
+  "smsEnabler": {
+    "webhookUrl": "https://YOUR-DOMAIN/api/smsenabler/incoming",
+    "tokenHeader": "X-HarborPOS-Token",
+    "notes": "Configure SMS Enabler SMS-to-Web to POST incoming SMS to webhookUrl. Keep the token secret."
+  }
+}

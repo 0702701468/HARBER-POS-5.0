@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: harborpos
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PGSSLMODE
+        value: require
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SMS_ENABLER_TOKEN
+        sync: false

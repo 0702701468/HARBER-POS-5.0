@@ -1,0 +1,16 @@
+{
+  "name": "harborpos-production",
+  "version": "4.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "db:init": "node db-init.js",
+    "check": "node -c server.js && node -c app.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
+  }
+}

@@ -23,3 +23,6 @@ It also permits email/password to be optional so card-only staff accounts can be
 
 ## Important
 Do not store real staff passwords or PINs in frontend code, GitHub, or screenshots. Keep `DATABASE_URL` and `SESSION_SECRET` in server environment variables.
+
+
+IMPORTANT: If Chrome shows File:///.../index.html, do not use that page for server login/setup. Run START-HARBORPOS.bat and use http://localhost:8787, or use the deployed Render URL. Card numbers may be 1-32 characters; PINs are 4-8 digits.

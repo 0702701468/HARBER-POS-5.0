@@ -76,7 +76,7 @@ async function dbSaveUser(session,payload,id=''){
   if(payload.pin && !/^\d{4,8}$/.test(String(payload.pin)))throw new Error('PIN must be 4 to 8 digits');
   const client=await pool.connect();
   try{
-    const dup=await client.query(`select id from users where business_id=$1 and ((email is not null and email=$2) or ($3<>'' and card_no=$3)) and ($4='' or id<>$4)`,[session.businessId,email,cardNo,id]);
+    const dup=await client.query(`select id from users where business_id=$1 and ((email is not null and email=$2) or ($3<>'' and card_no=$3)) and ($4='' or id::text<>$4)`,[session.businessId,email,cardNo,id]);
     if(dup.rowCount)throw new Error('That email or card number is already in use');
     if(id){
       const old=await client.query(`select password_hash,pin_hash from users where id=$1 and business_id=$2`,[id,session.businessId]); if(!old.rowCount)throw new Error('Staff account not found');
@@ -114,11 +114,46 @@ const localStateFile=path.join(DATA_DIR,'cloud-state.json');
 function localLoad(){try{return JSON.parse(fs.readFileSync(localStateFile,'utf8'));}catch{return null;}}
 function localSave(state){fs.writeFileSync(localStateFile,JSON.stringify(state,null,2));}
 
+
+async function dbSetupStatus(){
+  if(!USE_DB) return {enabled:!!process.env.SETUP_MODE,configured:false,users:0};
+  const r=await pool.query('select count(*)::int as count from users');
+  return {enabled:process.env.SETUP_MODE==='true',configured:r.rows[0].count>0,users:r.rows[0].count};
+}
+async function dbCreateSetupOwner(payload){
+  if(process.env.SETUP_MODE!=='true') throw new Error('First-time setup is disabled');
+  if(!USE_DB) throw new Error('PostgreSQL is required for first-time setup');
+  const name=String(payload.name||'').trim();
+  const email=String(payload.email||'').trim().toLowerCase();
+  const password=String(payload.password||'');
+  const cardNo=String(payload.cardNo||'').trim();
+  const pin=String(payload.pin||'').trim();
+  if(!name||!email||!password) throw new Error('Name, email and password are required');
+  if(password.length<8) throw new Error('Password must be at least 8 characters');
+  if(cardNo && !/^[A-Za-z0-9_-]{1,32}$/.test(cardNo)) throw new Error('Invalid card number');
+  if(pin && !/^\d{4,8}$/.test(pin)) throw new Error('PIN must be 4 to 8 digits');
+  const client=await pool.connect();
+  try{
+    const dup=await client.query(`select id from users where lower(email)=lower($1) or ($2<>'' and card_no=$2) limit 1`,[email,cardNo]);
+    if(dup.rowCount) throw new Error('That email or card number is already in use');
+    const biz=await client.query(`select id from businesses order by created_at asc limit 1`);
+    if(!biz.rowCount) throw new Error('No HarborPOS business exists yet. Initialize the database first.');
+    const businessId=biz.rows[0].id;
+    const levels=await client.query(`select id from access_levels where business_id=$1 order by id limit 1`,[businessId]);
+    if(!levels.rowCount) throw new Error('Access levels are not initialized');
+    const branches=await client.query(`select id from branches where business_id=$1 and active=true order by name`,[businessId]);
+    const u=await client.query(`insert into users(business_id,name,email,card_no,password_hash,pin_hash,role,level_id,active) values($1,$2,$3,$4,$5,$6,'Owner',$7,true) returning id,name,email,card_no,role,level_id,active`,[businessId,name,email,cardNo||null,hashPassword(password),pin?hashPassword(pin):null,levels.rows[0].id]);
+    for(const br of branches.rows){await client.query(`insert into user_branches(user_id,branch_id) values($1,$2) on conflict do nothing`,[u.rows[0].id,br.id]);}
+    return {id:u.rows[0].id,name:u.rows[0].name,email:u.rows[0].email,cardNo:u.rows[0].card_no||'',role:u.rows[0].role,level:Number(u.rows[0].level_id),active:true};
+  } finally {client.release();}
+}
 const server=http.createServer(async(req,res)=>{
   const u=new URL(req.url,`http://${req.headers.host}`);
   if(req.method==='OPTIONS')return json(res,204,{});
   try{
     if(u.pathname==='/api/health')return json(res,200,{ok:true,service:'HarborPOS',cloudMode:USE_DB?'postgresql':'server-persistent-file',databaseConfigured:!!DATABASE_URL,pgLoaded:!!pg,time:new Date().toISOString()});
+    if(u.pathname==='/api/setup/status'&&req.method==='GET'){return json(res,200,{ok:true,...await dbSetupStatus()});}
+    if(u.pathname==='/api/setup/create-owner'&&req.method==='POST'){try{const body=JSON.parse(await collect(req)||'{}');const user=await dbCreateSetupOwner(body);return json(res,201,{ok:true,user});}catch(e){return json(res,400,{ok:false,error:e.message});}}
     if(u.pathname==='/api/auth/login'&&req.method==='POST'){
       const body=JSON.parse(await collect(req)||'{}'); const method=body.method==='card'?'card':'email'; const identifier=String(body.identifier||body.email||body.cardNo||'').trim(); const secret=String(body.secret||body.password||body.pin||'');
       if(!identifier||!secret)return json(res,400,{ok:false,error:method==='card'?'Enter card number and PIN':'Enter email and password'});
